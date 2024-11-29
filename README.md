@@ -22,9 +22,9 @@ Add the library as a dependency in your project. If you’re using Maven:
 
 ```
 <dependency>
-    <groupId>io.koncept</groupId>
-    <artifactId>openai-client</artifactId>
-    <version>1.0.0</version>
+    <groupId>koncept</groupId>
+    <artifactId>KonceptAIClient</artifactId>
+    <version>0.1.0</version>
 </dependency>
 ```
 

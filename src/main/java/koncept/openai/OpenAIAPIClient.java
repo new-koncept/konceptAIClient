@@ -15,6 +15,8 @@ import koncept.openai.model.MessageResponse;
 import koncept.openai.model.MessagesListResponse;
 import koncept.openai.model.RunRequest;
 import koncept.openai.model.RunResponse;
+import koncept.openai.model.SubmitToolOutputsRunRequest;
+import koncept.openai.model.SubmitToolOutputsRunResponse;
 import koncept.openai.model.ThreadResponse;
 
 /**
@@ -161,6 +163,32 @@ public class OpenAIAPIClient {
             RunResponse runResponse = sendGetRequest(url, RunResponse.class);
             LOGGER.info(() -> "Run retrieved for thread with id: " + threadId);
             return runResponse;
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Submits tool outputs for a specific thread and run.
+     *
+     * @param submitToolOutputsRunRequest The {@link SubmitToolOutputsRunRequest} object containing
+     *                                    the tool outputs to be submitted.
+     * @param threadId                    The ID of the thread for which tool outputs are to be submitted.
+     * @param runId                       The ID of the run associated with the tool outputs.
+     * @return A {@link SubmitToolOutputsRunResponse} object containing the response of the submitted tool outputs.
+     * @throws RuntimeException if an error occurs while sending the request or processing the response.
+     */
+    public SubmitToolOutputsRunResponse submitToolOutputs(final SubmitToolOutputsRunRequest submitToolOutputsRunRequest,
+                                                          final String threadId,
+                                                          final String runId) {
+        String url = THREADS_URL + "/" + threadId + "/runs/" + runId + "/submit_tool_outputs";
+        try {
+            SubmitToolOutputsRunResponse submitToolOutputsRunResponse = sendPostRequest(url,
+                submitToolOutputsRunRequest,
+                SubmitToolOutputsRunResponse.class
+            );
+            LOGGER.info(() -> "Tool outputs submitted for thread with id: " + threadId + "with id: " + submitToolOutputsRunResponse.id());
+            return submitToolOutputsRunResponse;
         } catch (IOException | InterruptedException e) {
             throw new RuntimeException(e);
         }

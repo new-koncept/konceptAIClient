@@ -28,11 +28,13 @@ public record RunResponse(
     Long failedAt,
     @JsonProperty("completed_at")
     Long completedAt,
+    @JsonProperty("required_action")
+    RequiredAction requiredAction,
     @JsonProperty("last_error")
     String lastError,
     String model,
     String instructions,
-    List<String> tools,
+    List<Object> tools,
     @JsonProperty("file_ids")
     List<String> fileIds,
     Map<String, Object> metadata) {

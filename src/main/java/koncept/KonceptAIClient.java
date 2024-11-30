@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import koncept.jsonschema.SchemaTransformer;
 import koncept.openai.OpenAIAPIClient;
+import koncept.openai.function.ToolRegistry;
 import koncept.openai.model.AssistantRequest;
 import koncept.openai.model.AssistantResponse;
 import koncept.openai.model.AssistantsApiResponseFormatOption;
@@ -20,10 +21,16 @@ import koncept.openai.model.Message;
 import koncept.openai.model.MessageResponse;
 import koncept.openai.model.MessagesListResponse;
 import koncept.openai.model.OpenAIModel;
+import koncept.openai.model.RequiredAction;
 import koncept.openai.model.ResponseFormatJsonSchema;
 import koncept.openai.model.RunRequest;
 import koncept.openai.model.RunResponse;
+import koncept.openai.model.SubmitToolOutputs;
+import koncept.openai.model.SubmitToolOutputsRunRequest;
+import koncept.openai.model.SubmitToolOutputsRunResponse;
 import koncept.openai.model.ThreadResponse;
+import koncept.openai.model.ToolCall;
+import koncept.openai.model.ToolOutput;
 
 public class KonceptAIClient {
 
@@ -111,6 +118,7 @@ public class KonceptAIClient {
         try {
             RunRequest runRequest = new RunRequest(assistantId);
             RunResponse runResponseDTO = openAIAPIClient.runMessage(runRequest, threadId);
+
             String runId = runResponseDTO.id();
             waitUntilRunIsFinished(threadId, runId, 10);
             MessagesListResponse messagesListResponseDTO = openAIAPIClient.getMessages(threadId);
@@ -211,6 +219,14 @@ public class KonceptAIClient {
         try {
             runResponseDTO = openAIAPIClient.getRun(threadId, runId);
             String runStatus = runResponseDTO.status();
+            if (runResponseDTO.requiredAction() != null) {
+                Object o = invokeFunction(runResponseDTO.requiredAction());
+                String id = runResponseDTO.requiredAction().submitToolOutputs().toolCalls().get(0).id();
+                SubmitToolOutputsRunRequest submitToolOutputsRunRequest =
+                    new SubmitToolOutputsRunRequest(List.of(new ToolOutput(id, objectMapper.writeValueAsString(o))), true);
+                SubmitToolOutputsRunResponse submitToolOutputsRunResponse = openAIAPIClient.submitToolOutputs(submitToolOutputsRunRequest, threadId, runId);
+                System.out.println(submitToolOutputsRunResponse);
+            }
             LOGGER.info(() -> "Current status of run " + runId + " at thread " + threadId + " is: " + runStatus);
             System.out.println("Status of your run is currently " + runStatus);
             return isRunStateFinal(runStatus);
@@ -218,6 +234,11 @@ public class KonceptAIClient {
             LOGGER.severe(() -> "Failed to get run info, retrying..." + e);
             return false;
         }
+    }
+
+    private Object invokeFunction(final RequiredAction requiredAction) {
+        ToolCall toolCall = requiredAction.submitToolOutputs().toolCalls().get(0);
+        return ToolRegistry.invokeTool(toolCall.function().name(), toolCall.function().arguments());
     }
 
     private boolean isRunStateFinal(final String runStatus) {

@@ -10,6 +10,6 @@ import koncept.openai.model.deserializer.MapStringDeserializer;
 public record Function(
     String name,
     @JsonDeserialize(using = MapStringDeserializer.class)
-    Map<String, String> arguments
+    Map<String, Object> arguments
 ) {
 }

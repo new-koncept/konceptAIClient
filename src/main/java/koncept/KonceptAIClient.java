@@ -1,6 +1,7 @@
 package koncept;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -8,6 +9,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -25,9 +27,7 @@ import koncept.openai.model.RequiredAction;
 import koncept.openai.model.ResponseFormatJsonSchema;
 import koncept.openai.model.RunRequest;
 import koncept.openai.model.RunResponse;
-import koncept.openai.model.SubmitToolOutputs;
 import koncept.openai.model.SubmitToolOutputsRunRequest;
-import koncept.openai.model.SubmitToolOutputsRunResponse;
 import koncept.openai.model.ThreadResponse;
 import koncept.openai.model.ToolCall;
 import koncept.openai.model.ToolOutput;
@@ -64,6 +64,11 @@ public class KonceptAIClient {
         return instance;
     }
 
+    /**
+     * Retrieves the raw OpenAI API client used for direct interactions with the OpenAI backend.
+     *
+     * @return The instance of OpenAIAPIClient associated with this client, enabling low-level API operations.
+     */
     public OpenAIAPIClient getRawClient() {
         return this.openAIAPIClient;
     }
@@ -220,12 +225,7 @@ public class KonceptAIClient {
             runResponseDTO = openAIAPIClient.getRun(threadId, runId);
             String runStatus = runResponseDTO.status();
             if (runResponseDTO.requiredAction() != null) {
-                Object o = invokeFunction(runResponseDTO.requiredAction());
-                String id = runResponseDTO.requiredAction().submitToolOutputs().toolCalls().get(0).id();
-                SubmitToolOutputsRunRequest submitToolOutputsRunRequest =
-                    new SubmitToolOutputsRunRequest(List.of(new ToolOutput(id, objectMapper.writeValueAsString(o))), true);
-                SubmitToolOutputsRunResponse submitToolOutputsRunResponse = openAIAPIClient.submitToolOutputs(submitToolOutputsRunRequest, threadId, runId);
-                System.out.println(submitToolOutputsRunResponse);
+                processRequiredActions(threadId, runId, runResponseDTO.requiredAction());
             }
             LOGGER.info(() -> "Current status of run " + runId + " at thread " + threadId + " is: " + runStatus);
             System.out.println("Status of your run is currently " + runStatus);
@@ -236,9 +236,28 @@ public class KonceptAIClient {
         }
     }
 
-    private Object invokeFunction(final RequiredAction requiredAction) {
-        ToolCall toolCall = requiredAction.submitToolOutputs().toolCalls().get(0);
-        return ToolRegistry.invokeTool(toolCall.function().name(), toolCall.function().arguments());
+    private void processRequiredActions(String threadId, String runId, RequiredAction requiredAction) {
+        Map<String, CompletableFuture<Object>> futuresMap = requiredAction
+            .submitToolOutputs()
+            .toolCalls()
+            .stream()
+            .collect(Collectors.toMap(
+                ToolCall::id,
+                call -> CompletableFuture.supplyAsync(() -> invokeToolFunction(call))
+            ));
+        CompletableFuture.allOf(
+            futuresMap.values().toArray(new CompletableFuture[0])
+        ).join();
+
+        List<ToolOutput> toolOutputs = futuresMap.entrySet().stream().
+            map(es -> new ToolOutput(es.getKey(), es.getValue().join().toString()))
+            .collect(Collectors.toList());
+        SubmitToolOutputsRunRequest submitToolOutputsRunResponse = new SubmitToolOutputsRunRequest(toolOutputs, false);
+        openAIAPIClient.submitToolOutputs(submitToolOutputsRunResponse, threadId, runId);
+    }
+
+    private Object invokeToolFunction(ToolCall call) {
+        return ToolRegistry.invokeTool(call.function().name(), call.function().arguments());
     }
 
     private boolean isRunStateFinal(final String runStatus) {

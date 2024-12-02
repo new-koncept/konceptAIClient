@@ -82,6 +82,25 @@ public class Example {
 }
 ```
 
+#### Tool invocation
+
+The ToolFunction annotation enables dynamic function invocation based on assistant responses.
+To use this feature, annotate your methods with @ToolFunction, specifying a unique name. For example:
+
+```
+@ToolFunction(name = "get_available_pets")
+public Set<Pet> getAvailablePets(@NamedParam("types") List<PetType> types, @NamedParam("minimal_experience") RequiredExperience minimalExperience) {
+    return availablePets.stream()
+        .filter(typePredicate(types))
+        .filter(minimalExperiencePredicate(minimalExperience))
+        .collect(Collectors.toSet());
+}
+
+```
+When an assistant response requests this tool, the library maps parameters dynamically (e.g., "types": ["DOG", "CAT"] and "minimal_experience": "MEDIUM")
+and invokes the function. The output is then processed and returned to the assistant.
+This seamless integration supports robust workflows for applications that rely on real-time assistant interactions.
+
 ### Low-Level Client (OpenAIAPIClient)
 
 #### Create an Assistant

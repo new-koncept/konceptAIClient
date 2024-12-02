@@ -1,6 +1,7 @@
 package koncept;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -8,11 +9,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import koncept.jsonschema.SchemaTransformer;
 import koncept.openai.OpenAIAPIClient;
+import koncept.openai.function.ToolRegistry;
 import koncept.openai.model.AssistantRequest;
 import koncept.openai.model.AssistantResponse;
 import koncept.openai.model.AssistantsApiResponseFormatOption;
@@ -20,10 +23,14 @@ import koncept.openai.model.Message;
 import koncept.openai.model.MessageResponse;
 import koncept.openai.model.MessagesListResponse;
 import koncept.openai.model.OpenAIModel;
+import koncept.openai.model.RequiredAction;
 import koncept.openai.model.ResponseFormatJsonSchema;
 import koncept.openai.model.RunRequest;
 import koncept.openai.model.RunResponse;
+import koncept.openai.model.SubmitToolOutputsRunRequest;
 import koncept.openai.model.ThreadResponse;
+import koncept.openai.model.ToolCall;
+import koncept.openai.model.ToolOutput;
 
 public class KonceptAIClient {
 
@@ -57,6 +64,11 @@ public class KonceptAIClient {
         return instance;
     }
 
+    /**
+     * Retrieves the raw OpenAI API client used for direct interactions with the OpenAI backend.
+     *
+     * @return The instance of OpenAIAPIClient associated with this client, enabling low-level API operations.
+     */
     public OpenAIAPIClient getRawClient() {
         return this.openAIAPIClient;
     }
@@ -111,6 +123,7 @@ public class KonceptAIClient {
         try {
             RunRequest runRequest = new RunRequest(assistantId);
             RunResponse runResponseDTO = openAIAPIClient.runMessage(runRequest, threadId);
+
             String runId = runResponseDTO.id();
             waitUntilRunIsFinished(threadId, runId, 10);
             MessagesListResponse messagesListResponseDTO = openAIAPIClient.getMessages(threadId);
@@ -211,6 +224,9 @@ public class KonceptAIClient {
         try {
             runResponseDTO = openAIAPIClient.getRun(threadId, runId);
             String runStatus = runResponseDTO.status();
+            if (runResponseDTO.requiredAction() != null) {
+                processRequiredActions(threadId, runId, runResponseDTO.requiredAction());
+            }
             LOGGER.info(() -> "Current status of run " + runId + " at thread " + threadId + " is: " + runStatus);
             System.out.println("Status of your run is currently " + runStatus);
             return isRunStateFinal(runStatus);
@@ -218,6 +234,30 @@ public class KonceptAIClient {
             LOGGER.severe(() -> "Failed to get run info, retrying..." + e);
             return false;
         }
+    }
+
+    private void processRequiredActions(String threadId, String runId, RequiredAction requiredAction) {
+        Map<String, CompletableFuture<Object>> futuresMap = requiredAction
+            .submitToolOutputs()
+            .toolCalls()
+            .stream()
+            .collect(Collectors.toMap(
+                ToolCall::id,
+                call -> CompletableFuture.supplyAsync(() -> invokeToolFunction(call))
+            ));
+        CompletableFuture.allOf(
+            futuresMap.values().toArray(new CompletableFuture[0])
+        ).join();
+
+        List<ToolOutput> toolOutputs = futuresMap.entrySet().stream().
+            map(es -> new ToolOutput(es.getKey(), es.getValue().join().toString()))
+            .collect(Collectors.toList());
+        SubmitToolOutputsRunRequest submitToolOutputsRunResponse = new SubmitToolOutputsRunRequest(toolOutputs, false);
+        openAIAPIClient.submitToolOutputs(submitToolOutputsRunResponse, threadId, runId);
+    }
+
+    private Object invokeToolFunction(ToolCall call) {
+        return ToolRegistry.invokeTool(call.function().name(), call.function().arguments());
     }
 
     private boolean isRunStateFinal(final String runStatus) {
